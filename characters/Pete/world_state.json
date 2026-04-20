@@ -1,0 +1,13 @@
+{
+    "time": {
+        "day": 1,
+        "season": "Spring",
+        "hour": 8,
+        "minute": 2
+    },
+    "current_location": {
+        "x": 200,
+        "y": 200
+    },
+    "status": "idle"
+}
