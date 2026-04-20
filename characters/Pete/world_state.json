@@ -2,15 +2,14 @@
     "time": {
         "day": 1,
         "season": "Spring",
-        "hour": 14,
-        "minute": 23
+        "hour": 16,
+        "minute": 44
     },
     "current_location": {
-        "x": 682,
-        "y": 382
+        "x": 440,
+        "y": 300
     },
-    "nearby_entities": [
-        "Bob"
-    ],
+    "current_zone": "Unknown",
+    "nearby_entities": [],
     "status": "active"
 }

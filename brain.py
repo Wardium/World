@@ -30,46 +30,56 @@ class Brain:
 
     
     def think(self):
-        # 1. Read Current State
         world = self.load_data("world_state.json")
-        memory = self.load_data("memory.json") # Expected to be a list of strings
-        inventory = self.load_data("inventory.json") # Expected to be a list of strings
+        memory = self.load_data("memory.json") 
+        inventory = self.load_data("inventory.json") 
         profile = self.load_data("profile.json")
         
-        if not world: return
+        if not world or world.get("status") == "dead": 
+            return # Dead people don't think!
 
         current_mood = profile.get("current_mood", "Neutral")
         nearby_entities = world.get("nearby_entities", [])
+
+        # --- READ GLOBAL CONTEXT ---
+        global_context = "No special world context."
+        if os.path.exists("global_context.txt"):
+            with open("global_context.txt", "r") as f:
+                global_context = f.read()
 
         # 2. Construct the Master Prompt
         prompt = f"""
         You are {self.name} living in a simulated 2D world.
         
+        GLOBAL VISION CONTEXT: {global_context}
+        
         CURRENT TIME: {world.get('time', 'Unknown')}
         YOUR LOCATION: X:{world['current_location']['x']}, Y:{world['current_location']['y']}
+        YOUR ZONE: {world.get('current_zone', 'Unknown')}
         YOUR MOOD: {current_mood}
+        YOUR STATUS: {world.get('status', 'active')}
         YOUR INVENTORY: {inventory}
-        YOUR MEMORIES: {memory[-10:]} # Only show last 10 to save tokens
+        YOUR MEMORIES: {memory[-10:]} 
         NEARBY ENTITIES: {nearby_entities}
         
         RULES OF THE WORLD:
-        1. You can do ANYTHING. You can invent items in your mind, but try to use what is in your inventory.
-        2. If you want to talk to the "Viewer" (the god looking down at you), set target_entity to "Viewer".
-        3. If your mood changes, you can choose to isolate yourself or act out.
+        1. You can do ANYTHING. 
+        2. If you want to approach someone, use action "goto" and set target_entity.
+        3. If your zone is "Claimable Space", you can use action "claim" and set 'item' to what you want the room to be called (e.g. "Kitchen", "My Lair"). This claims it permanently.
         
-        Choose ONE action type: "walk", "talk", "use", "give", "stay", "think".
+        Choose ONE action type: "walk", "goto", "talk", "use", "give", "stay", "think", "sleep", "kill", "claim".
         
         Respond ONLY with a raw JSON object matching this schema exactly:
         {{
-            "thought": "your internal monologue explaining your choice",
+            "thought": "your internal monologue",
             "action": "one of the action types",
-            "target_x": integer or null (if walking, pick coordinates between 50 and 750),
-            "target_y": integer or null (if walking, pick coordinates between 50 and 550),
+            "target_x": integer or null,
+            "target_y": integer or null,
             "target_entity": "name of person or object" or null,
-            "item": "name of item" or null,
+            "item": "name of item or name of claimed room" or null,
             "message": "what you say out loud" or null,
             "new_emotion": "your current mood now",
-            "new_memory": "a short sentence summarizing what you just did or realized, or null if nothing memorable happened"
+            "new_memory": "a short memory"
         }}
         """
 
@@ -79,11 +89,8 @@ class Brain:
             clean_text = response_text.replace("```json", "").replace("```", "").strip()
             decision = json.loads(clean_text)
             
-            # Save the action for the engine
             self.save_action(decision)
             
-            # --- SELF-UPDATING PSYCHOLOGY ---
-            # Update memories and mood directly in the Brain so it persists!
             if decision.get("new_memory"):
                 memory.append(decision["new_memory"])
                 with open(os.path.join(self.folder, "memory.json"), 'w') as f:

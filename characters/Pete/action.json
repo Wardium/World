@@ -1,4 +1,5 @@
 {
-    "target_poi": "HOME",
-    "current_thought": "I looked at my goals and decided to go to HOME."
+    "action": "idle",
+    "thought": "Waiting for next thought...",
+    "message": ""
 }

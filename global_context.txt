@@ -1,0 +1,5 @@
+
+[Territory] The red zone near X:513, Y:384 is claimed by Pete as: Secret Lair
+[Territory] The red zone near X:513, Y:384 is claimed by Pete as: Kitchen
+[Territory] The red zone near X:536, Y:540 is claimed by Pete as: Armory
+[Territory] The red zone near X:440, Y:300 is claimed by Pete as: Armory
