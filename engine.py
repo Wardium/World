@@ -16,16 +16,36 @@ POIS = {
 }
 
 # --- 1. The Time System ---
+# --- 1. The Time System ---
 class TimeSystem:
     def __init__(self):
-        self.tick_rate = 1.0 # 1 real second = 1 in-game minute (adjust for speed)
+        self.tick_rate = 0.5 # 0.5 real seconds = 1 in-game minute (Twice as fast)
         self.last_update = time.time()
+        self.save_file = "global_time.json"
         
-        self.minute = 0
-        self.hour = 8   # Start at 8 AM
-        self.day = 1
+        # Load saved time if it exists
+        saved_data = {}
+        if os.path.exists(self.save_file):
+            try:
+                with open(self.save_file, 'r') as f:
+                    saved_data = json.load(f)
+            except:
+                pass
+                
+        self.minute = saved_data.get("minute", 0)
+        self.hour = saved_data.get("hour", 8)
+        self.day = saved_data.get("day", 1)
         self.seasons = ["Spring", "Summer", "Autumn", "Winter"]
-        self.current_season_index = 0
+        self.current_season_index = saved_data.get("season_index", 0)
+
+    def save_time(self):
+        with open(self.save_file, 'w') as f:
+            json.dump({
+                "minute": self.minute,
+                "hour": self.hour,
+                "day": self.day,
+                "season_index": self.current_season_index
+            }, f)
 
     def update(self):
         now = time.time()
@@ -36,15 +56,18 @@ class TimeSystem:
             if self.minute >= 60:
                 self.minute = 0
                 self.hour += 1
+                self.save_time() # Save game every hour to avoid spamming the hard drive
             
             if self.hour >= 24:
                 self.hour = 0
                 self.day += 1
                 
-                # Change season every 30 days
-                if self.day > 30:
-                    self.day = 1
+                # Repeat to 0 after 11 days
+                if self.day >= 11:
+                    self.day = 0
                     self.current_season_index = (self.current_season_index + 1) % 4
+                
+                self.save_time()
 
     def get_time_string(self):
         season = self.seasons[self.current_season_index]
@@ -168,16 +191,37 @@ class Character:
                 self.dialogue_timer = time.time()
             self.target_x, self.target_y = None, None # Stop walking to talk/use
 
-    def update_movement(self):
+    def update_movement(self, collision_map):
         if self.target_x is not None and self.target_y is not None:
             dx, dy = self.target_x - self.x, self.target_y - self.y
             distance = ((dx**2) + (dy**2))**0.5
 
-            if distance > self.speed:
-                self.x += (dx / distance) * self.speed
-                self.y += (dy / distance) * self.speed
-            else:
-                self.target_x, self.target_y = None, None # Arrived
+            if distance > 0: # Prevent dividing by zero
+                move_x = (dx / distance) * self.speed
+                move_y = (dy / distance) * self.speed
+                
+                next_x = self.x + move_x
+                next_y = self.y + move_y
+                
+                # Check boundaries of the 1080x1080 map
+                if 0 <= int(next_x) < 1080 and 0 <= int(next_y) < 1080:
+                    # Check pixel color on the collision map
+                    color = collision_map.get_at((int(next_x), int(next_y)))
+                    
+                    # If RGB values are high (meaning white or near-white)
+                    if color.r > 200 and color.g > 200 and color.b > 200:
+                        # Wall hit! Clear target and stop.
+                        self.target_x, self.target_y = None, None
+                        return
+                    else:
+                        self.x = next_x
+                        self.y = next_y
+                else:
+                    self.target_x, self.target_y = None, None # Arrived or out of bounds
+
+            if distance <= self.speed:
+                self.x, self.y = self.target_x, self.target_y
+                self.target_x, self.target_y = None, None # Arrived perfectly
 
     def draw(self, screen, font):
         pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), 15)
@@ -197,10 +241,24 @@ class Character:
 class Engine:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((800, 600))
+        self.screen = pygame.display.set_mode((1080, 1080)) # Set map size
         pygame.display.set_caption("AI Sandbox")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 36)
+        
+        # Load the visual map and collision map
+        try:
+            self.world_map = pygame.image.load(MAP_IMAGE).convert()
+            self.world_map = pygame.transform.scale(self.world_map, (1080, 1080))
+            
+            self.collision_map = pygame.image.load(COLLISION_MAP).convert()
+            self.collision_map = pygame.transform.scale(self.collision_map, (1080, 1080))
+        except Exception as e:
+            print(f"Error loading maps: {e}. Ensure world_map.png and collision_map.png exist.")
+            self.world_map = pygame.Surface((1080, 1080))
+            self.world_map.fill((30, 100, 30))
+            self.collision_map = pygame.Surface((1080, 1080))
+            self.collision_map.fill((0, 0, 0)) # Default to walkable black
         
         self.time_system = TimeSystem()
         self.characters = []
@@ -212,18 +270,26 @@ class Engine:
         if not os.path.exists(BASE_CHAR_PATH):
             return
             
-        # Get a list of names currently in the game
         current_names = [char.name for char in self.characters]
         
-        # Look at the actual folders on your hard drive
+        # Add a blacklist for temporary OS folders and hidden files
+        ignored_names = ["new folder", "untitled folder", "untitled"]
+        
         for item in os.listdir(BASE_CHAR_PATH):
             folder_path = os.path.join(BASE_CHAR_PATH, item)
             
             if os.path.isdir(folder_path):
-                # If we found a folder that isn't in our active characters list...
+                # Skip hidden folders (like .git or .DS_Store) and temporary OS names
+                if item.startswith('.') or item.lower() in ignored_names:
+                    continue 
+                
+                # Check for things like "New folder (2)" 
+                if item.lower().startswith("new folder"):
+                    continue
+
                 if item not in current_names:
                     print(f"✨ NEW ENTITY DETECTED: {item}. Initializing...")
-                    new_char = Character(item) # This triggers the __init__ above to make files
+                    new_char = Character(item)
                     self.characters.append(new_char)
 
     def load_characters(self):
@@ -278,19 +344,16 @@ class Engine:
                 if event.type == pygame.QUIT:
                     running = False
 
-            # Update Time
+            # --- 1. Update Time (Runs every frame) ---
             self.time_system.update()
 
-           # Inside the Engine.run() loop, update the 2-second timer block:
+            # --- 2. AI & Data Radar (Runs every 2 seconds) ---
             if time.time() - update_timer > 2.0:
-                # 1. Check for newly dropped folders FIRST
                 self.check_for_new_characters()
                 
                 time_state = self.time_system.get_state_dict()
                 
-                # 2. Update everyone
                 for char in self.characters:
-                    # Sync profile in case you manually changed their color/mood in the JSON
                     char.profile = char.load_json("profile.json", char.profile)
                     char.name = char.profile.get("name", char.name)
                     char.color = tuple(char.profile.get("color", char.color))
@@ -298,7 +361,6 @@ class Engine:
                     char.write_world_state(time_state, self.characters)
                     char.read_ai_action()
                     
-                    # 3. Process Give Actions
                     action_type = char.action_data.get("action")
                     if action_type == "give":
                         target = char.action_data.get("target_entity")
@@ -309,12 +371,14 @@ class Engine:
                             
                 update_timer = time.time()
 
-            # Update Physical World
-            self.screen.fill((30, 30, 30)) # Dark gray background for now
+            # --- 3. Render Graphics (Runs every frame) ---
+            # IMPORTANT: These lines must be aligned with the 'if' statement above, NOT inside it!
+            
+            self.screen.blit(self.world_map, (0, 0)) 
 
             for char in self.characters:
-                char.update_movement()
-                char.draw(self.screen)
+                char.update_movement(self.collision_map) 
+                char.draw(self.screen, self.font)
 
             # Draw Time HUD
             time_text = self.font.render(self.time_system.get_time_string(), True, (255, 255, 255))

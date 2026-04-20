@@ -1,0 +1,9 @@
+{
+    "name": "Bob",
+    "color": [
+        213,
+        158,
+        213
+    ],
+    "current_mood": "Neutral"
+}

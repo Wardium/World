@@ -6,11 +6,11 @@
         "minute": 23
     },
     "current_location": {
-        "x": 682,
-        "y": 382
+        "x": 652,
+        "y": 390
     },
     "nearby_entities": [
-        "Bob"
+        "Pete"
     ],
     "status": "active"
 }

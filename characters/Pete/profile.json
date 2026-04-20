@@ -1,8 +1,9 @@
 {
     "name": "Pete",
     "color": [
-        150,
-        150,
-        150
-    ]
+        156,
+        76,
+        235
+    ],
+    "current_mood": "Neutral"
 }
