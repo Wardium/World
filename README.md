@@ -1,2 +1,4 @@
-pip install pygame
-pip install ollamafreeapi --upgrade
+```bash
+  pip install pygame
+  pip install ollamafreeapi --upgrad
+```
