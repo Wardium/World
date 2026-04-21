@@ -155,7 +155,11 @@ class Character:
             if other.name != self.name and getattr(other, "status", "active") != "dead":
                 dist = ((other.x - self.x)**2 + (other.y - self.y)**2)**0.5
                 if dist < 150:
-                    nearby.append(other.name)
+                    # NEW: Include what they are currently saying!
+                    if other.dialogue:
+                        nearby.append(f"{other.name} (Saying: '{other.dialogue}')")
+                    else:
+                        nearby.append(other.name)
 
         zone = "Unknown"
         try:
