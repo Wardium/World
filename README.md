@@ -1,4 +1,4 @@
 ```bash
   pip install pygame
-  pip install ollamafreeapi --upgrad
+  pip install ollamafreeapi --upgrade
 ```
