@@ -1,5 +1,12 @@
 {
-    "action": "idle",
-    "thought": "Waiting for next thought...",
-    "message": ""
+    "current_goal": "Explore the world",
+    "thought": "I have completed my main tests. I will just wander.",
+    "action": "walk",
+    "target_x": 656,
+    "target_y": 646,
+    "target_entity": null,
+    "item": null,
+    "message": null,
+    "new_emotion": "Determined",
+    "new_memory": null
 }

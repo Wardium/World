@@ -1,15 +1,17 @@
 {
     "time": {
-        "day": 1,
+        "day": 2,
         "season": "Spring",
-        "hour": 16,
-        "minute": 44
+        "hour": 0,
+        "minute": 35
     },
     "current_location": {
-        "x": 440,
-        "y": 300
+        "x": 656,
+        "y": 646
     },
-    "current_zone": "Unknown",
+    "current_zone": "Outside",
     "nearby_entities": [],
-    "status": "active"
+    "status": "active",
+    "last_action_feedback": "SUCCESS: Arrived at destination.",
+    "is_busy": false
 }

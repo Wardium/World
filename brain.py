@@ -30,56 +30,61 @@ class Brain:
 
     
     def think(self):
+        import os, json
         world = self.load_data("world_state.json")
         memory = self.load_data("memory.json") 
         inventory = self.load_data("inventory.json") 
         profile = self.load_data("profile.json")
         
-        if not world or world.get("status") == "dead": 
-            return # Dead people don't think!
+        if not world or world.get("status") == "dead": return
+
+        # --- THE PATIENCE LOCK ---
+        # If the engine says we are busy walking, stop thinking and wait!
+        if world.get("is_busy"):
+            return 
 
         current_mood = profile.get("current_mood", "Neutral")
+        current_goal = profile.get("current_goal", "Wander and survive.")
         nearby_entities = world.get("nearby_entities", [])
+        system_feedback = world.get("last_action_feedback", "None")
 
-        # --- READ GLOBAL CONTEXT ---
         global_context = "No special world context."
         if os.path.exists("global_context.txt"):
-            with open("global_context.txt", "r") as f:
-                global_context = f.read()
+            with open("global_context.txt", "r") as f: global_context = f.read()
 
-        # 2. Construct the Master Prompt
+        # The Prompt now includes GOALS and SYSTEM FEEDBACK
         prompt = f"""
-        You are {self.name} living in a simulated 2D world.
+        You are {self.name}.
+        GLOBAL CONTEXT: {global_context}
         
-        GLOBAL VISION CONTEXT: {global_context}
-        
-        CURRENT TIME: {world.get('time', 'Unknown')}
-        YOUR LOCATION: X:{world['current_location']['x']}, Y:{world['current_location']['y']}
-        YOUR ZONE: {world.get('current_zone', 'Unknown')}
+        YOUR GOAL: {current_goal}
         YOUR MOOD: {current_mood}
-        YOUR STATUS: {world.get('status', 'active')}
-        YOUR INVENTORY: {inventory}
-        YOUR MEMORIES: {memory[-10:]} 
+        YOUR ZONE: {world.get('current_zone', 'Unknown')}
+        SYSTEM FEEDBACK FROM LAST ACTION: {system_feedback} 
+        (If feedback is FAILED, you must change your strategy or move closer.)
+        
+        INVENTORY: {inventory}
+        MEMORIES: {memory[-5:]} 
         NEARBY ENTITIES: {nearby_entities}
         
-        RULES OF THE WORLD:
-        1. You can do ANYTHING. 
-        2. If you want to approach someone, use action "goto" and set target_entity.
-        3. If your zone is "Claimable Space", you can use action "claim" and set 'item' to what you want the room to be called (e.g. "Kitchen", "My Lair"). This claims it permanently.
+        RULES:
+        1. To walk to a claimed territory, use "goto_area" and set 'item' to the territory name.
+        2. To walk to an unclaimed general environment type, use "goto_zone" and set 'item' to "Inside", "Outside", or "Claimable Space".
+        3. To claim a territory, you MUST physically be in a Claimable Space. Use "claim" and set 'item' to the desired name.
+        4. Always maintain a current_goal.
         
-        Choose ONE action type: "walk", "goto", "talk", "use", "give", "stay", "think", "sleep", "kill", "claim".
+        Choose ONE action: "walk", "goto", "goto_area", "goto_zone", "talk", "use", "give", "stay", "think", "sleep", "kill", "claim".
         
-        Respond ONLY with a raw JSON object matching this schema exactly:
+        Respond ONLY with raw JSON:
         {{
-            "thought": "your internal monologue",
+            "current_goal": "Your overarching task",
+            "thought": "Your reasoning based on feedback and goals",
             "action": "one of the action types",
-            "target_x": integer or null,
-            "target_y": integer or null,
-            "target_entity": "name of person or object" or null,
-            "item": "name of item or name of claimed room" or null,
-            "message": "what you say out loud" or null,
-            "new_emotion": "your current mood now",
-            "new_memory": "a short memory"
+            "target_x": int or null, "target_y": int or null,
+            "target_entity": "name" or null, "item": "name" or null,
+            "message": "dialogue" or null,
+            "new_emotion": "mood",
+            "new_memory": "short memory"
         }}
         """
 
@@ -88,21 +93,17 @@ class Brain:
         try:
             clean_text = response_text.replace("```json", "").replace("```", "").strip()
             decision = json.loads(clean_text)
-            
             self.save_action(decision)
             
-            if decision.get("new_memory"):
-                memory.append(decision["new_memory"])
-                with open(os.path.join(self.folder, "memory.json"), 'w') as f:
-                    json.dump(memory, f, indent=4)
+            # Save new Goals, Moods, and Memories
+            if decision.get("new_memory"): memory.append(decision["new_memory"])
+            with open(os.path.join(self.folder, "memory.json"), 'w') as f: json.dump(memory, f, indent=4)
                     
-            if decision.get("new_emotion"):
-                profile["current_mood"] = decision["new_emotion"]
-                with open(os.path.join(self.folder, "profile.json"), 'w') as f:
-                    json.dump(profile, f, indent=4)
+            profile["current_mood"] = decision.get("new_emotion", current_mood)
+            profile["current_goal"] = decision.get("current_goal", current_goal)
+            with open(os.path.join(self.folder, "profile.json"), 'w') as f: json.dump(profile, f, indent=4)
             
             print(f"[{self.name} - {profile['current_mood']}]: {decision.get('thought')}")
-
         except Exception as e:
             print(f"[{self.name}]: Brain malfunction. {e}")
     

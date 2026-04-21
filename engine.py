@@ -127,6 +127,7 @@ class Character:
         
         self.status = "active"
         self.death_time = None
+        self.system_feedback = "None"
 
     def ensure_file(self, filename, default_content):
         filepath = os.path.join(self.folder_path, filename)
@@ -156,26 +157,37 @@ class Character:
                 if dist < 150:
                     nearby.append(other.name)
 
-        # --- SEMANTIC RADAR: Read the pixel color ---
         zone = "Unknown"
         try:
             if 0 <= int(self.x) < 1080 and 0 <= int(self.y) < 1080:
                 color = collision_map.get_at((int(self.x), int(self.y)))
-                if color.g > 150 and color.r < 100 and color.b < 100: zone = "Inside"
-                elif color.r > 150 and color.g > 150 and color.b < 100: zone = "Outside"
-                elif color.r > 150 and color.g < 100 and color.b < 100: zone = "Claimable Space"
+                r, g, b = int(color.r), int(color.g), int(color.b)
+                if g > r + 40 and g > b + 40: zone = "Inside"
+                elif r > 100 and g > 100 and b < 80 and abs(r - g) < 50: zone = "Outside"
+                elif r > g + 40 and r > b + 40: zone = "Claimable Space"
         except Exception:
             pass
+
+        # --- NEW: Check if currently traveling ---
+        is_busy = False
+        if self.target_x is not None or self.follow_target is not None:
+            is_busy = True
 
         state = {
             "time": time_dict,
             "current_location": {"x": int(self.x), "y": int(self.y)},
             "current_zone": zone,
             "nearby_entities": nearby,
-            "status": getattr(self, "status", "active")
+            "status": getattr(self, "status", "active"),
+            "last_action_feedback": getattr(self, "system_feedback", "None"),
+            "is_busy": is_busy # Pass the flag to the Brain!
         }
+        import os, json
         with open(os.path.join(self.folder_path, "world_state.json"), 'w') as f:
             json.dump(state, f, indent=4)
+            
+        if self.system_feedback != "None":
+            self.system_feedback = "None"
 
     def read_ai_action(self):
         if getattr(self, "status", "active") == "dead": return 
@@ -227,6 +239,7 @@ class Character:
                 self.target_x, self.target_y = target_char.x, target_char.y
             else:
                 self.follow_target = None 
+                self.system_feedback = "FAILED: Target disappeared or died."
 
         if self.target_x is not None and self.target_y is not None:
             dx, dy = self.target_x - self.x, self.target_y - self.y
@@ -234,6 +247,7 @@ class Character:
 
             if self.follow_target and distance < 40:
                 self.target_x, self.target_y = None, None
+                self.system_feedback = f"SUCCESS: Approached {self.follow_target}."
                 return
 
             if distance > 0:
@@ -246,15 +260,18 @@ class Character:
                     color = collision_map.get_at((int(next_x), int(next_y)))
                     if color.r > 200 and color.g > 200 and color.b > 200:
                         self.target_x, self.target_y, self.follow_target = None, None, None
+                        self.system_feedback = "FAILED: Path blocked by an obstacle."
                         return
                     else:
                         self.x, self.y = next_x, next_y
                 else:
                     self.target_x, self.target_y, self.follow_target = None, None, None
+                    self.system_feedback = "FAILED: Path out of bounds."
 
             if not self.follow_target and distance <= self.speed:
                 self.x, self.y = self.target_x, self.target_y
                 self.target_x, self.target_y = None, None
+                self.system_feedback = "SUCCESS: Arrived at destination."
 
     def draw(self, surface, font):
         import pygame
@@ -409,6 +426,7 @@ class Engine:
 
     def run(self):
         running = True
+        import time
         update_timer = time.time()
 
         while running:
@@ -444,61 +462,143 @@ class Engine:
                     if getattr(char, "status", "active") == "dead":
                         continue 
 
-                    # 2. Process Claim, Give, Kill, and Use actions
+                    # 2. Process Claim, Give, Kill, Use, Goto Zone, and Goto Area actions
                     action_type = char.action_data.get("action")
                     
                     if action_type == "claim":
-                        zone_name = char.action_data.get("item", "My Room")
-                        claim_msg = f"\n[Territory] The red zone near X:{int(char.x)}, Y:{int(char.y)} is claimed by {char.name} as: {zone_name}"
-                        with open("global_context.txt", "a") as f:
-                            f.write(claim_msg)
-                        print(f"🚩 SYSTEM: {char.name} claimed territory as {zone_name}!")
+                        # 1. Verify physical location using the map
+                        try:
+                            color = self.collision_map.get_at((int(char.x), int(char.y)))
+                            is_red = int(color.r) > int(color.g) + 40 and int(color.r) > int(color.b) + 40
+                        except:
+                            is_red = False
+                            
+                        if not is_red:
+                            char.system_feedback = "FAILED: You must physically stand inside a Red area to claim it."
+                        else:
+                            # 2. Verify it hasn't been claimed yet
+                            already_claimed = False
+                            zone_name = char.action_data.get("item", "My Room")
+                            
+                            import os, re
+                            if os.path.exists("global_context.txt"):
+                                with open("global_context.txt", "r") as f:
+                                    for line in f:
+                                        if "[Territory]" in line:
+                                            match = re.search(r"X:(\d+), Y:(\d+)", line)
+                                            if match:
+                                                cx, cy = int(match.group(1)), int(match.group(2))
+                                                dist = ((char.x - cx)**2 + (char.y - cy)**2)**0.5
+                                                if dist < 80: 
+                                                    already_claimed = True
+                                                    break
+                            
+                            if already_claimed:
+                                char.system_feedback = "FAILED: This red area has already been claimed by someone."
+                            else:
+                                claim_msg = f"\n[Territory] The red zone near X:{int(char.x)}, Y:{int(char.y)} is claimed by {char.name} as: {zone_name}"
+                                with open("global_context.txt", "a") as f: f.write(claim_msg)
+                                char.system_feedback = f"SUCCESS: Claimed territory as {zone_name}."
+                                print(f"🚩 SYSTEM: {char.name} successfully claimed {zone_name}!")
+                        
+                        char.clear_action()
+
+                    elif action_type == "goto_area":
+                        import os, re, random
+                        area_name = char.action_data.get("item")
+                        found = False
+                        if os.path.exists("global_context.txt"):
+                            with open("global_context.txt", "r") as f:
+                                for line in f:
+                                    if f"as: {area_name}" in line:
+                                        match = re.search(r"X:(\d+), Y:(\d+)", line)
+                                        if match:
+                                            # Pick a random point within 60 pixels of the claimed center
+                                            char.target_x = int(match.group(1)) + random.randint(-60, 60)
+                                            char.target_y = int(match.group(2)) + random.randint(-60, 60)
+                                            char.system_feedback = f"SUCCESS: Found {area_name}. Navigating there now."
+                                            found = True
+                                            break
+                        if not found:
+                            char.system_feedback = f"FAILED: Could not find territory '{area_name}' in the world."
+                        char.clear_action()
+
+                    elif action_type == "goto_zone":
+                        import random
+                        target_zone = char.action_data.get("item")
+                        found = False
+                        
+                        # 1. Local Area Scan (Simulating a 300-pixel "Vision Radius")
+                        for _ in range(500): 
+                            rx = int(char.x) + random.randint(-300, 300)
+                            ry = int(char.y) + random.randint(-300, 300)
+                            
+                            # Make sure we don't look outside the map boundaries
+                            if 0 <= rx < 1080 and 0 <= ry < 1080:
+                                try:
+                                    color = self.collision_map.get_at((rx, ry))
+                                    r, g, b = int(color.r), int(color.g), int(color.b)
+                                    
+                                    match = False
+                                    if target_zone == "Inside" and g > r + 40 and g > b + 40: match = True
+                                    elif target_zone == "Outside" and r > 100 and g > 100 and b < 80 and abs(r - g) < 50: match = True
+                                    elif target_zone == "Claimable Space" and r > g + 40 and r > b + 40: match = True
+                                    
+                                    if match:
+                                        char.target_x, char.target_y = rx, ry
+                                        char.system_feedback = f"SUCCESS: Spotted {target_zone} nearby. Walking there."
+                                        found = True
+                                        break
+                                except:
+                                    pass
+                                    
+                        # 2. Search Mode (If they didn't see it, they wander to look for it)
+                        if not found:
+                            char.target_x = max(50, min(1030, int(char.x) + random.randint(-400, 400)))
+                            char.target_y = max(50, min(1030, int(char.y) + random.randint(-400, 400)))
+                            char.system_feedback = f"FAILED: Could not see {target_zone} nearby. Wandering to search for it."
+                        
                         char.clear_action()
                         
                     elif action_type in ["give", "use", "kill"]:
                         target = char.action_data.get("target_entity")
                         item = char.action_data.get("item")
-                        
                         action_allowed = True
                         
-                        # 1. NEW: Prevent self-gifting and self-harm
                         if target == char.name:
                             print(f"🛑 SYSTEM: {char.name} tried to {action_type} themselves, but that is not allowed!")
                             action_allowed = False
-                            
-                        # 2. Only check distance if the target is someone else
                         elif target:
                             target_char = next((c for c in self.characters if c.name == target), None)
                             if target_char:
-                                # Calculate physical distance between the two
                                 dist = ((char.x - target_char.x)**2 + (char.y - target_char.y)**2)**0.5
-                                
-                                # 50 pixels is roughly "side-by-side" based on circle radius
                                 if dist > 50:
                                     print(f"🛑 {char.name} is too far away to {action_type} {target}!")
+                                    char.system_feedback = f"FAILED: {target} is too far away."
                                     action_allowed = False
-                                    
-                        # 3. Execute the action only if it passed all checks
+                            else:
+                                char.system_feedback = f"FAILED: {target} does not exist in this world."
+                                action_allowed = False
+                                
                         if action_allowed:
                             if action_type == "give" and target and item:
                                 self.process_give_action(char, target, item)
+                                char.system_feedback = f"SUCCESS: Gave {item} to {target}."
                             elif action_type == "kill" and target:
                                 self.process_kill_action(char, target)
+                                char.system_feedback = f"SUCCESS: Killed {target}."
                             elif action_type == "use":
                                 print(f"🛠️ SYSTEM: {char.name} used {item} on {target}")
+                                char.system_feedback = f"SUCCESS: Used {item} on {target}."
                                 
-                        # Always clear the action so they don't get stuck in a loop
                         char.clear_action()
                             
                 update_timer = time.time()
 
             # --- 3. Render Graphics ---
-            
-            # A. Draw everything to the 1080x1080 internal canvas first
             self.canvas.blit(self.world_map, (0, 0)) 
 
             for char in self.characters:
-                # PASS ALL CHARACTERS HERE so they know who to follow
                 char.update_movement(self.collision_map, self.characters) 
                 char.draw(self.canvas, self.font) 
 
